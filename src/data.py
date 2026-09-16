@@ -37,9 +37,13 @@ def aggregate_daily(df: pd.DataFrame) -> pd.DataFrame:
 
     Zwraca DataFrame z kolumną `units`; zmienne zewnętrzne agregowane osobno
     (epidemia: max — wystarczy 1 sklep, żeby zakłócić sieć; reszta: średnia).
+    Demand: suma (cenzurowany popyt); demand - units = utracona sprzedaż
+    (lost sales), rośnie przy niskim zapasie — kandydat na cechę laga (patrz EDA).
     """
     daily = df.groupby("Date").agg(
         units=("Units Sold", "sum"), # ile sprzedano
+        demand=("Demand", "sum"), # popyt (cenzurowany zapasem): suma
+
         epidemic=("Epidemic", "max"), # czy była epidemia
         promotion=("Promotion", "mean"), # Czy była "naklejka promocja"
         discount=("Discount", "mean"), # Jaki była obniżka
