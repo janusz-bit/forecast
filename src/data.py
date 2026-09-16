@@ -39,13 +39,14 @@ def aggregate_daily(df: pd.DataFrame) -> pd.DataFrame:
     (epidemia: max — wystarczy 1 sklep, żeby zakłócić sieć; reszta: średnia).
     """
     daily = df.groupby("Date").agg(
-        units=("Units Sold", "sum"),
-        epidemic=("Epidemic", "max"),
-        promotion=("Promotion", "mean"),
-        discount=("Discount", "mean"),
-        price=("Price", "mean"),
-        competitor_price=("Competitor Pricing", "mean"),
-        inventory=("Inventory Level", "sum"),
+        units=("Units Sold", "sum"), # ile sprzedano
+        epidemic=("Epidemic", "max"), # czy była epidemia
+        promotion=("Promotion", "mean"), # Czy była "naklejka promocja"
+        discount=("Discount", "mean"), # Jaki była obniżka
+        # Trzeba przemyśleć czy średnia ważona (dane historyczne, wyliczyć wagi koszyka, czy w inny sposób)
+        price=("Price", "mean"), # Cena
+        competitor_price=("Competitor Pricing", "mean"), # Cena u konkurencji
+        inventory=("Inventory Level", "sum"), # Liczba na sklepie
     )
     daily.index.name = "Date"
     return daily
