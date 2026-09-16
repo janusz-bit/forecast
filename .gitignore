@@ -1,0 +1,16 @@
+# --- local working files ---
+/priv/
+
+# --- artefakty ---
+outputs/*.csv
+
+# --- środowisko ---
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+# --- system ---
+.DS_Store
+Thumbs.db

@@ -1,0 +1,14 @@
+[project]
+name = "sales-forecast"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "kagglehub>=1.0.2",
+    "matplotlib>=3.7",
+    "numpy>=1.24",
+    "pandas>=1.5",
+    "plotly>=5",
+    "scikit-learn>=1.2",
+    "statsmodels>=0.14",
+    "streamlit>=1.30",
+]
