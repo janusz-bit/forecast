@@ -4,6 +4,9 @@
 # --- dane wynikowe (outputs/*.csv) są commitowane: aplikacja na
 #     Streamlit Cloud czyta je z repo; regeneruje je src/data.py + src/model.py ---
 
+# --- artefakt pakietu streamlit (symlink do .venv) ---
+.agents/
+
 # --- środowisko ---
 .venv/
 venv/

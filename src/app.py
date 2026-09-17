@@ -95,16 +95,16 @@ fig = go.Figure()
 hist = view[view["actual"].notna()]
 fig.add_trace(go.Scattergl(  # type: ignore[attr-defined]
     x=hist.index, y=hist["actual"], name="Rzeczywista sprzedaż",
-    line=dict(color="#1f77b4", width=1.5)))
+    line=dict(color="#60A5FA", width=1.5)))
 fig.add_vrect(
     x0=hist.index.max() - pd.Timedelta(days=28), x1=hist.index.max(),
-    fillcolor="rgba(0,0,0,0.06)", line_width=0,
+    fillcolor="rgba(241,245,249,0.10)", line_width=0,
     annotation_text="walidacja", annotation_position="top left")
 
 fut = view[view["baseline"].notna()]
 fig.add_trace(go.Scatter(
     x=fut.index, y=fut["baseline"], name="Baseline (średnia krocząca 28d)",
-    line=dict(color="#ff7f0e", width=1.5, dash="dot")))
+    line=dict(color="#FB923C", width=1.5, dash="dot")))
 
 # linia modelu: walidacja = epidemia wg danych; przyszłość = przesuwak
 fut_all = forecast[forecast["split"] == "future"]
@@ -117,29 +117,34 @@ model_dynamic = (fut_all["model_ep0"]
                  + (fut_all["model_ep1"] - fut_all["model_ep0"]) * ep_flag)
 fig.add_trace(go.Scatter(
     x=fut.index, y=fut["model_ep0"], name="Model (bez epidemii)",
-    line=dict(color="#9467bd", width=1.2, dash="dash"), opacity=0.7))
+    line=dict(color="#A78BFA", width=1.2, dash="dash"), opacity=0.7))
 fig.add_trace(go.Scatter(
     x=view[view["model_ep_actual"].notna()].index,
     y=view["model_ep_actual"].dropna(), name="Model (walidacja, epidemia wg danych)",
-    line=dict(color="#2ca02c", width=2)))
+    line=dict(color="#34D399", width=2)))
 fig.add_trace(go.Scatter(
     x=fut_all.index, y=model_dynamic,
     name="Model (prognoza: przesuwak epidemii)",
-    line=dict(color="#2ca02c", width=2)))
+    line=dict(color="#34D399", width=2)))
 
 fig.update_layout(
-    height=460, margin=dict(l=10, r=10, t=30, b=10),
-    legend=dict(orientation="h", y=1.08, x=0),
+    hovermode="x unified",
+    height=420, margin=dict(l=10, r=10, t=30, b=10),
     yaxis_title="sztuki / dzień", xaxis_title=None,
+    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+    font=dict(color="#F1F5F9"),
+    xaxis=dict(gridcolor="#334155", zerolinecolor="#334155"),
+    yaxis=dict(gridcolor="#334155", zerolinecolor="#334155"),
+    legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
 )
-st.plotly_chart(fig, use_container_width=True)
+st.plotly_chart(fig, width="stretch")
 
 # --- tabela metryk ---
 st.subheader("Metryki jakości prognozy (walidacja: ostatnie 28 dni)")
 met_view = metrics.copy()
 for col in ("MAE", "RMSE", "MAPE", "bias"):
     met_view[col] = met_view[col].round(1)
-st.dataframe(met_view, use_container_width=True, hide_index=True)
+st.dataframe(met_view, width="stretch", hide_index=True)
 
 with st.expander("Jak czytać metryki?"):
     st.markdown(
@@ -161,7 +166,7 @@ future.columns = ["Baseline (28d śr.)"]
 future["Model"] = model_dynamic
 st.dataframe(
     future.round(0).style.format("{:,.0f}"),
-    use_container_width=True,
+    width="stretch",
 )
 st.caption(f"Suma prognozy modelu na 28 dni: {future['Model'].sum():,.0f} szt. "
            f"(baseline: {future['Baseline (28d śr.)'].sum():,.0f} szt.; "
@@ -175,16 +180,16 @@ p_fc = products_fc[products_fc["product_id"] == product_id]
 fig_p = go.Figure()
 p_val = p_fc[p_fc["actual"].notna()]
 fig_p.add_trace(go.Scatter(x=p_val.index, y=p_val["actual"],
-                           name="Rzeczywista sprzedaż", line=dict(color="#1f77b4", width=1.5)))
+                           name="Rzeczywista sprzedaż", line=dict(color="#60A5FA", width=1.5)))
 fig_p.add_trace(go.Scatter(x=p_fc.index, y=p_fc["baseline"], name="Baseline",
-                           line=dict(color="#ff7f0e", width=1.5, dash="dot")))
+                           line=dict(color="#FB923C", width=1.5, dash="dot")))
 fig_p.add_trace(go.Scatter(x=p_fc.index, y=p_fc["model_ep0"], name="Model (bez epidemii)",
-                           line=dict(color="#2ca02c", width=2)))
+                           line=dict(color="#34D399", width=2)))
 fig_p.update_layout(height=380, margin=dict(l=10, r=10, t=10, b=10),
                     yaxis_title="sztuki / dzień", legend=dict(orientation="h", y=1.12, x=0))
-st.plotly_chart(fig_p, use_container_width=True)
+st.plotly_chart(fig_p, width="stretch")
 
 p_met = products_met[products_met["product_id"] == product_id].copy()
 for col in ("MAE", "RMSE", "MAPE", "bias"):
     p_met[col] = p_met[col].round(1)
-st.dataframe(p_met, use_container_width=True, hide_index=True)
+st.dataframe(p_met, width="stretch", hide_index=True)
