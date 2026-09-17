@@ -36,6 +36,18 @@ def load_metrics() -> pd.DataFrame:
 forecast = load_forecast()
 metrics = load_metrics()
 
+
+@st.cache_data
+def load_products() -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Bonus: forecast_products.csv i metrics_products.csv (top-3 produkty)."""
+    fc = pd.read_csv(OUTPUTS_DIR / "forecast_products.csv",
+                     parse_dates=["Date"], index_col="Date")
+    met = pd.read_csv(OUTPUTS_DIR / "metrics_products.csv")
+    return fc, met
+
+
+products_fc, products_met = load_products()
+
 st.sidebar.header("Fragmentator")
 
 # --- zakres dat ---
@@ -121,3 +133,25 @@ st.dataframe(
 )
 st.caption(f"Suma prognozy modelu na 28 dni: {future['Model'].sum():,.0f} szt. "
            f"(baseline: {future['Baseline (28d śr.)'].sum():,.0f} szt.)")
+
+# --- bonus: top-3 produkty ---
+st.subheader("Bonus: prognozy dla top-3 produktów (wg łącznej sprzedaży)")
+product_id = st.selectbox("Produkt", sorted(products_fc["product_id"].unique()))
+
+p_fc = products_fc[products_fc["product_id"] == product_id]
+fig_p = go.Figure()
+p_val = p_fc[p_fc["actual"].notna()]
+fig_p.add_trace(go.Scatter(x=p_val.index, y=p_val["actual"],
+                           name="Rzeczywista sprzedaż", line=dict(color="#1f77b4", width=1.5)))
+fig_p.add_trace(go.Scatter(x=p_fc.index, y=p_fc["baseline"], name="Baseline",
+                           line=dict(color="#ff7f0e", width=1.5, dash="dot")))
+fig_p.add_trace(go.Scatter(x=p_fc.index, y=p_fc["model_ep0"], name="Model (bez epidemii)",
+                           line=dict(color="#2ca02c", width=2)))
+fig_p.update_layout(height=380, margin=dict(l=10, r=10, t=10, b=10),
+                    yaxis_title="sztuki / dzień", legend=dict(orientation="h", y=1.12, x=0))
+st.plotly_chart(fig_p, use_container_width=True)
+
+p_met = products_met[products_met["product_id"] == product_id].copy()
+for col in ("MAE", "RMSE", "MAPE", "bias"):
+    p_met[col] = p_met[col].round(1)
+st.dataframe(p_met, use_container_width=True, hide_index=True)

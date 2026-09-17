@@ -24,10 +24,16 @@ import numpy as np
 import pandas as pd
 from sklearn.linear_model import LinearRegression
 
+try:
+    from src.data import load_raw          # uruchomienie z katalogu projektu
+except ImportError:                        # noqa: F401
+    from data import load_raw              # uruchomienie: python src/model.py
+
 HORIZON = 28          # horyzont prognozy [dni] - zadanie: 4 tygodnie
 FOURIER_K = 2         # pary harmonicznych sezonu rocznego
 ROLLING_WINDOW = 28   # okno baseline'u (średnia krocząca)
 CV_FOLDS = 5          # foldy rolling-origin CV (po 28 dni) w obrębie treningu
+BONUS_TOP_N = 3       # bonus: prognoza dla top N produktów
 
 OUTPUTS_DIR = Path("outputs")
 
@@ -111,6 +117,51 @@ def rolling_origin_cv(daily: pd.DataFrame, n_folds: int = CV_FOLDS,
             "model_bez_epidemii": mean_scores(model_scores)}
 
 
+def product_series(raw: pd.DataFrame, product_id: str) -> pd.DataFrame:
+    """Dzienny szereg jednego produktu (suma po sklepach) z flagą epidemii."""
+    sub = raw[raw["Product ID"] == product_id]
+    return (sub.groupby("Date")
+               .agg(units=("Units Sold", "sum"), epidemic=("Epidemic", "max"))
+               .sort_index())
+
+
+def run_bonus(daily_full: pd.DataFrame, horizon: int = HORIZON) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Bonus: prognozy dla top-3 produktów wg łącznej sprzedaży.
+
+    Dla każdego produktu: ten sam model (Fourier + DOW + epidemia), walidacja
+    na ostatnich `horizon` dniach i prognoza produkcyjna (scenariusz bez
+    epidemii). Zwraca (forecast_products, metrics_products).
+    """
+    raw = load_raw()
+    top = raw.groupby("Product ID")["Units Sold"].sum().nlargest(BONUS_TOP_N).index
+    fc_parts, met_rows = [], []
+    for pid in top:
+        s = product_series(raw, pid)
+        train, val = s.iloc[:-horizon], s.iloc[-horizon:]
+        model = fit_model(train)
+        val_ep0 = predict(model, val.index, epidemic=0.0)
+        val_base = baseline_forecast(train["units"], val.index)
+        model_full = fit_model(s)
+        fut_idx = pd.date_range(s.index[-1] + pd.Timedelta(days=1),
+                                periods=horizon, freq="D")
+        parts = [
+            pd.DataFrame({"product_id": pid, "split": "val", "actual": val["units"],
+                          "baseline": val_base, "model_ep0": val_ep0}),
+            pd.DataFrame({"product_id": pid, "split": "future", "actual": np.nan,
+                          "baseline": baseline_forecast(s["units"], fut_idx),
+                          "model_ep0": predict(model_full, fut_idx, epidemic=0.0)},
+                         index=fut_idx),
+        ]
+        fc_parts.extend(parts)
+        met_rows.append({"product_id": pid, "model": "baseline", "window": "val",
+                         **score(val_base, val["units"])})
+        met_rows.append({"product_id": pid, "model": "model", "window": "val",
+                         "scenario": "bez_epidemii", **score(val_ep0, val["units"])})
+    fc = pd.concat(fc_parts)
+    fc.index.name = "Date"
+    return fc, pd.DataFrame(met_rows)
+
+
 def main() -> None:
     daily = load_daily()
     train, val = daily.iloc[:-HORIZON], daily.iloc[-HORIZON:]
@@ -166,8 +217,17 @@ def main() -> None:
     metrics = pd.DataFrame(rows)
     metrics.to_csv(OUTPUTS_DIR / "metrics.csv", index=False)
 
+    # --- bonus: prognozy top-3 produktów ---
+    fc_products, met_products = run_bonus(daily)
+    fc_products.to_csv(OUTPUTS_DIR / "forecast_products.csv", index_label="Date")
+    met_products.to_csv(OUTPUTS_DIR / "metrics_products.csv", index=False)
+
     print(metrics.round(1).to_string(index=False))
-    print(f"\nZapisano: {OUTPUTS_DIR / 'forecast.csv'} i {OUTPUTS_DIR / 'metrics.csv'}")
+    print("\nBonus - top-3 produkty (walidacja, MAE):")
+    print(met_products.round(1).to_string(index=False))
+    print(f"\nZapisano: {OUTPUTS_DIR / 'forecast.csv'}, {OUTPUTS_DIR / 'metrics.csv'}, "
+          f"{OUTPUTS_DIR / 'forecast_products.csv'}, {OUTPUTS_DIR / 'metrics_products.csv'}")
+
 
 
 if __name__ == "__main__":
