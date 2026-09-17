@@ -70,10 +70,13 @@ Kod: [`src/model.py`](src/model.py). Pełny pipeline: `src/data.py` → agregacj
 Bez trendu liniowego: w rolling CV wariant z trendem nie poprawiał MAE, a ekstrapolacja
 trendu poza zakres treningu jest ryzykowna.
 
-Epidemia jest **nieznana ex ante**, więc prognoza powstaje w dwóch scenariuszach
-(przełącznik w aplikacji): *bez epidemii* (domyślny) i *epidemia trwa*. Na walidacji
-dodatkowo liczymy wariant *rzeczywista epidemia* (oracle) — w praktyce status epidemii
-jest ogłaszany z wyprzedzeniem, więc to realistyczny wariant.
+Epidemia jest **nieznana ex ante**, więc prognoza powstaje w wariantach scenariuszowych.
+W aplikacji okres epidemii w oknie prognozy ustawia się **suwakiem dat** (dowolny
+przedział w horyzoncie 28 dni) — prognoza reaguje natychmiast, bo jest dokładnie liniowa
+względem flagi epidemii (`pred(ep) = pred(0) + [pred(1) − pred(0)] · ep`, bez
+przeliczeń w aplikacji). Na walidacji dodatkowo liczymy wariant *rzeczywista epidemia*
+(oracle) — w praktyce status epidemii jest ogłaszany z wyprzedzeniem, więc to
+realistyczny wariant.
 
 ### Metryki (walidacja: ostatnie 28 dni; CV: rolling-origin, 5 foldów × 28 dni)
 

@@ -197,6 +197,9 @@ def main() -> None:
     out["model_ep1"] = np.nan
     out.loc[val.index, "model_ep1"] = val_ep1.values
     out.loc[future_index, "model_ep1"] = fut_ep1.values
+    # epidemia wg danych (tylko walidacja): linia modelu do wykresu w aplikacji
+    out["model_ep_actual"] = np.nan
+    out.loc[val.index, "model_ep_actual"] = val_ep_actual.values
     out.index.name = "Date"
     OUTPUTS_DIR.mkdir(exist_ok=True)
     out.to_csv(OUTPUTS_DIR / "forecast.csv")

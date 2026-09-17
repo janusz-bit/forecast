@@ -61,14 +61,27 @@ date_range = st.sidebar.date_input(
     max_value=end_date,
 )
 
-# --- scenariusz epidemii ---
-scenario = st.sidebar.radio(
-    "Scenariusz epidemii (prognoza)",
-    ("bez epidemii", "epidemia trwa"),
-    help="Epidemia jest nieznana ex ante - prognoza bazuje na założeniu "
-         "o jej przebiegu w oknie prognozy.",
-)
-model_col = "model_ep0" if scenario == "bez epidemii" else "model_ep1"
+# --- dynamiczny przesuwak: okres epidemii w oknie prognozy ---
+future_df = forecast[forecast["split"] == "future"]
+fut_min, fut_max = future_df.index.min().date(), future_df.index.max().date()
+
+ep_on = st.sidebar.checkbox("Epidemia w oknie prognozy", value=False,
+                            help="Przesuń, w których dniach prognozy (28 dni po "
+                                 "końcu danych) ma obowiązywać epidemia. Model "
+                                 "reaguje natychmiast (prognoza jest liniowa "
+                                 "względem flagi epidemii).")
+if ep_on:
+    ep_range = st.sidebar.slider(
+        "Dni epidemiczne",
+        min_value=fut_min, max_value=fut_max,
+        value=(fut_min, min(pd.Timestamp(fut_min) + pd.Timedelta(days=5), pd.Timestamp(fut_max)).date()),
+        format="DD.MM.YYYY",
+    )
+else:
+    ep_range = None
+
+n_ep_days = 0 if not ep_on else (ep_range[1] - ep_range[0]).days + 1
+st.sidebar.caption(f"Epidemia obejmie **{n_ep_days}** z 28 dni prognozy.")
 
 # --- filtr dat ---
 if len(date_range) == 2:
@@ -92,8 +105,26 @@ fut = view[view["baseline"].notna()]
 fig.add_trace(go.Scatter(
     x=fut.index, y=fut["baseline"], name="Baseline (średnia krocząca 28d)",
     line=dict(color="#ff7f0e", width=1.5, dash="dot")))
+
+# linia modelu: walidacja = epidemia wg danych; przyszłość = przesuwak
+fut_all = forecast[forecast["split"] == "future"]
+ep_flag = pd.Series(0.0, index=fut_all.index)
+if ep_on and ep_range[0] <= ep_range[1]:
+    ep_flag[(ep_flag.index >= pd.Timestamp(ep_range[0]))
+            & (ep_flag.index <= pd.Timestamp(ep_range[1]))] = 1.0
+# model liniowy: pred(ep) = pred(ep=0) + [pred(ep=1) - pred(ep=0)] * ep
+model_dynamic = (fut_all["model_ep0"]
+                 + (fut_all["model_ep1"] - fut_all["model_ep0"]) * ep_flag)
 fig.add_trace(go.Scatter(
-    x=fut.index, y=fut[model_col], name=f"Model ({scenario})",
+    x=fut.index, y=fut["model_ep0"], name="Model (bez epidemii)",
+    line=dict(color="#9467bd", width=1.2, dash="dash"), opacity=0.7))
+fig.add_trace(go.Scatter(
+    x=view[view["model_ep_actual"].notna()].index,
+    y=view["model_ep_actual"].dropna(), name="Model (walidacja, epidemia wg danych)",
+    line=dict(color="#2ca02c", width=2)))
+fig.add_trace(go.Scatter(
+    x=fut_all.index, y=model_dynamic,
+    name="Model (prognoza: przesuwak epidemii)",
     line=dict(color="#2ca02c", width=2)))
 
 fig.update_layout(
@@ -125,14 +156,16 @@ with st.expander("Jak czytać metryki?"):
 
 # --- prognoza na przyszłość: tabela ---
 st.subheader("Prognoza na najbliższe 4 tygodnie (po końcu danych)")
-future = forecast[forecast["split"] == "future"][["baseline", model_col]].copy()
-future.columns = ["Baseline (28d śr.)", "Model"]
+future = forecast[forecast["split"] == "future"][["baseline"]].copy()
+future.columns = ["Baseline (28d śr.)"]
+future["Model"] = model_dynamic
 st.dataframe(
     future.round(0).style.format("{:,.0f}"),
     use_container_width=True,
 )
 st.caption(f"Suma prognozy modelu na 28 dni: {future['Model'].sum():,.0f} szt. "
-           f"(baseline: {future['Baseline (28d śr.)'].sum():,.0f} szt.)")
+           f"(baseline: {future['Baseline (28d śr.)'].sum():,.0f} szt.; "
+           f"epidemia: {n_ep_days} dni)")
 
 # --- bonus: top-3 produkty ---
 st.subheader("Bonus: prognozy dla top-3 produktów (wg łącznej sprzedaży)")
