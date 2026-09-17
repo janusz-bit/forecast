@@ -180,12 +180,17 @@ def predict_lgbm(model: lgb.LGBMRegressor, index: pd.DatetimeIndex, epidemic,
 
 
 def score(pred: pd.Series, actual: pd.Series) -> dict:
-    """Metryki: MAE, RMSE, MAPE (%), bias (szt.; dodatni = przeszacowanie)."""
+    """Metryki: MAE, RMSE, MAPE (%), bias (szt.), MPE (%).
+
+    bias i MPE mierzą to samo - systematyczne odchylenie "w którą stronę":
+    bias w szt./dzień, MPE w % (bias / średni dzień). Dodatnie = przeszacowanie.
+    """
     err = pred - actual
     return {
         "MAE": float(np.abs(err).mean()),
         "RMSE": float(np.sqrt((err ** 2).mean())),
         "MAPE": float((np.abs(err) / actual).mean() * 100),
+        "MPE": float((err / actual).mean() * 100),
         "bias": float(err.mean()),
     }
 

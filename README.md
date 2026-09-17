@@ -80,16 +80,16 @@ realistyczny wariant.
 
 ### Metryki (walidacja: ostatnie 28 dni; CV: rolling-origin, 5 foldów × 28 dni)
 
-| model | okno | scenariusz | MAE | RMSE | MAPE | bias |
-|---|---|---|---|---|---|---|
-| baseline | val | — | 1053.5 | 1417.9 | 14.4% | +226 |
-| model | val | bez epidemii | 1298.8 | 1751.6 | 18.5% | +1121 |
-| model | val | rzeczywista epidemia | **652.5** | **798.1** | **7.8%** | +361 |
-| LightGBM | val | bez epidemii | 1231.9 | 1642.9 | 17.3% | +936 |
-| LightGBM | val | rzeczywista epidemia | 669.1 | 808.0 | 8.0% | **+268** |
-| baseline | CV (5×28d) | — | 890.9 | 1162.9 | 11.8% | +484 |
-| model | CV (5×28d) | bez epidemii | **835.5** | **1111.8** | **11.3%** | +408 |
-| LightGBM | CV (5×28d) | bez epidemii | 862.8 | 1172.1 | 11.6% | **+368** |
+| model | okno | scenariusz | MAE | RMSE | MAPE | MPE | bias |
+|---|---|---|---|---|---|---|---|
+| baseline | val | — | 1053.5 | 1417.9 | 14.4% | 6.0% | +226 |
+| model | val | bez epidemii | 1298.8 | 1751.6 | 18.5% | 16.8% | +1121 |
+| model | val | rzeczywista epidemia | **652.5** | **798.1** | **7.8%** | 4.3% | +361 |
+| LightGBM | val | bez epidemii | 1231.9 | 1642.9 | 17.3% | 14.4% | +936 |
+| LightGBM | val | rzeczywista epidemia | 669.1 | 808.0 | 8.0% | 3.5% | **+268** |
+| baseline | CV (5×28d) | — | 890.9 | 1162.9 | 11.8% | 8.0% | +484 |
+| model | CV (5×28d) | bez epidemii | **835.5** | **1111.8** | **11.3%** | 7.3% | +408 |
+| LightGBM | CV (5×28d) | bez epidemii | 862.8 | 1172.1 | 11.6% | 6.9% | **+368** |
 
 **Interpretacja (uczciwie):**
 - Na tym konkretnym oknie walidacji 6 z 28 dni to dni epidemiczne — scenariusz

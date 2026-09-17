@@ -178,7 +178,7 @@ st.plotly_chart(fig, width="stretch")
 # --- tabela metryk ---
 st.subheader("Metryki jakości prognozy (walidacja: ostatnie 28 dni)")
 met_view = metrics.copy()
-for col in ("MAE", "RMSE", "MAPE", "bias"):
+for col in ("MAE", "RMSE", "MAPE", "MPE", "bias"):
     met_view[col] = met_view[col].round(1)
 st.dataframe(met_view, width="stretch", hide_index=True)
 
@@ -209,8 +209,9 @@ with st.expander("Jak czytać metryki?"):
         "- **MAE** - średni błąd bezwzględny (sztuki/dzień);\n"
         "- **RMSE** - jak MAE, ale duże pomyłki ważą bardziej (szt./dzień);\n"
         "- **MAPE** - średni błąd względny (%);\n"
-        "- **bias** - średni błąd (predykcja − rzeczywistość); dodatni = "
-        "przeszacowanie sprzedaży.\n\n"
+        "- **MPE** - bias wyrażony w % (dodatni = przeszacowanie);\n"
+        "- **bias** - średni błąd w szt./dzień (predykcja − rzeczywistość); "
+        "dodatni = przeszacowanie sprzedaży.\n\n"
         "Scenariusz *epidemia_rzeczywista* (oracle) pokazuje, jak wyglądałaby "
         "prognoza ze znanym harmonogramem epidemii - w praktyce status epidemii "
         "jest ogłaszany z wyprzedzeniem. Szczegóły: README oraz rolling-origin "
@@ -248,6 +249,6 @@ fig_p.update_layout(height=380, margin=dict(l=10, r=10, t=10, b=10),
 st.plotly_chart(fig_p, width="stretch")
 
 p_met = products_met[products_met["product_id"] == product_id].copy()
-for col in ("MAE", "RMSE", "MAPE", "bias"):
+for col in ("MAE", "RMSE", "MAPE", "MPE", "bias"):
     p_met[col] = p_met[col].round(1)
 st.dataframe(p_met, width="stretch", hide_index=True)
