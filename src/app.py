@@ -95,7 +95,7 @@ fig = go.Figure()
 hist = view[view["actual"].notna()]
 fig.add_trace(go.Scattergl(  # type: ignore[attr-defined]
     x=hist.index, y=hist["actual"], name="Rzeczywista sprzedaż",
-    line=dict(color="#60A5FA", width=1.5)))
+    line=dict(color="#38BDF8", width=1.5)))
 fig.add_vrect(
     x0=hist.index.max() - pd.Timedelta(days=28), x1=hist.index.max(),
     fillcolor="rgba(241,245,249,0.10)", line_width=0,
@@ -104,7 +104,7 @@ fig.add_vrect(
 fut = view[view["baseline"].notna()]
 fig.add_trace(go.Scatter(
     x=fut.index, y=fut["baseline"], name="Baseline (średnia krocząca 28d)",
-    line=dict(color="#FB923C", width=1.5, dash="dot")))
+    line=dict(color="#FBBF24", width=1.5, dash="dot")))
 
 # linia modelu: walidacja = epidemia wg danych; przyszłość = przesuwak
 fut_all = forecast[forecast["split"] == "future"]
@@ -117,15 +117,15 @@ model_dynamic = (fut_all["model_ep0"]
                  + (fut_all["model_ep1"] - fut_all["model_ep0"]) * ep_flag)
 fig.add_trace(go.Scatter(
     x=fut.index, y=fut["model_ep0"], name="Model (bez epidemii)",
-    line=dict(color="#A78BFA", width=1.2, dash="dash"), opacity=0.7))
+    line=dict(color="#94A3B8", width=1.2, dash="dash"), opacity=0.7))
 fig.add_trace(go.Scatter(
     x=view[view["model_ep_actual"].notna()].index,
     y=view["model_ep_actual"].dropna(), name="Model (walidacja, epidemia wg danych)",
-    line=dict(color="#34D399", width=2)))
+    line=dict(color="#F472B6", width=2)))
 fig.add_trace(go.Scatter(
     x=fut_all.index, y=model_dynamic,
     name="Model (prognoza: przesuwak epidemii)",
-    line=dict(color="#34D399", width=2)))
+    line=dict(color="#F472B6", width=2)))
 
 fig.update_layout(
     hovermode="x unified",
@@ -180,11 +180,11 @@ p_fc = products_fc[products_fc["product_id"] == product_id]
 fig_p = go.Figure()
 p_val = p_fc[p_fc["actual"].notna()]
 fig_p.add_trace(go.Scatter(x=p_val.index, y=p_val["actual"],
-                           name="Rzeczywista sprzedaż", line=dict(color="#60A5FA", width=1.5)))
+                           name="Rzeczywista sprzedaż", line=dict(color="#38BDF8", width=1.5)))
 fig_p.add_trace(go.Scatter(x=p_fc.index, y=p_fc["baseline"], name="Baseline",
-                           line=dict(color="#FB923C", width=1.5, dash="dot")))
+                           line=dict(color="#FBBF24", width=1.5, dash="dot")))
 fig_p.add_trace(go.Scatter(x=p_fc.index, y=p_fc["model_ep0"], name="Model (bez epidemii)",
-                           line=dict(color="#34D399", width=2)))
+                           line=dict(color="#F472B6", width=2)))
 fig_p.update_layout(height=380, margin=dict(l=10, r=10, t=10, b=10),
                     yaxis_title="sztuki / dzień", legend=dict(orientation="h", y=1.12, x=0))
 st.plotly_chart(fig_p, width="stretch")
