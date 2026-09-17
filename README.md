@@ -83,28 +83,40 @@ realistyczny wariant.
 | model | okno | scenariusz | MAE | RMSE | MAPE | bias |
 |---|---|---|---|---|---|---|
 | baseline | val | — | 1053.5 | 1417.9 | 14.4% | +226 |
-| model | val | bez epidemii | 1328.1 | 1792.1 | 18.9% | +1154 |
-| model | val | rzeczywista epidemia | **663.1** | **809.4** | **7.9%** | +391 |
+| model | val | bez epidemii | 1298.8 | 1751.6 | 18.5% | +1121 |
+| model | val | rzeczywista epidemia | **652.5** | **798.1** | **7.8%** | +361 |
+| LightGBM | val | bez epidemii | 1231.9 | 1642.9 | 17.3% | +936 |
+| LightGBM | val | rzeczywista epidemia | 669.1 | 808.0 | 8.0% | **+268** |
 | baseline | CV (5×28d) | — | 890.9 | 1162.9 | 11.8% | +484 |
-| model | CV (5×28d) | bez epidemii | **840.7** | **1115.0** | **11.4%** | +410 |
-| LightGBM | val | bez epidemii | 1244.3 | 1665.0 | 17.5% | +944 |
-| LightGBM | val | rzeczywista epidemia | 665.7 | 807.1 | 7.9% | **+271** |
-| LightGBM | CV (5×28d) | bez epidemii | 862.8 | 1164.9 | 11.6% | **+384** |
+| model | CV (5×28d) | bez epidemii | **835.5** | **1111.8** | **11.3%** | +408 |
+| LightGBM | CV (5×28d) | bez epidemii | 862.8 | 1172.1 | 11.6% | **+368** |
 
 **Interpretacja (uczciwie):**
 - Na tym konkretnym oknie walidacji 6 z 28 dni to dni epidemiczne — scenariusz
   "bez epidemii" jest wtedy systematycznie zbyt optymistyczny (bias +1154), a baseline
   "zbiegiem okoliczności" trafił nisko (jego okno 28-dniowe zawiera dołek epidemiczny
   z końca treningu). Dlatego model przegrywa z baseline'em na val w tym scenariuszu.
-- Ze znanym harmonogramem epidemii model jest **o 37% lepszy od baseline'u** (MAE 663
-  vs 1053; MAPE 7.9% vs 14.4%).
+- Ze znanym harmonogramem epidemii model jest **o 38% lepszy od baseline'u** (MAE 652
+  vs 1053; MAPE 7.8% vs 14.4%).
 - W rolling-origin CV (5 foldów w treningu, scenariusz ex ante) model wygrywa
-  wszystkie 4 metryki — to najuczciwszy obraz średniej jakości.
+  z baseline'em MAE/RMSE/MAPE — to najuczciwszy obraz średniej jakości.
+
+**Cechy zewnętrzne — zmierzone, dwie decyzje:**
+- **Sezon kalendarzowy (Seasonality z danych) — ZOSTAŁ.** Kolumna jest
+  deterministyczna per data, więc współbieżna bez wycieku. Poprawia wszystkie
+  warianty (val-oracle MAE 663 → 652, CV 841 → 835).
+- **Cechy z lagiem 28 dni (zapas, promocja, rabat, cena, cena konkurencji,
+  jednostki per kategoria) — ODRZUCONE, choć zaimplementowane** (`make_features(
+  ..., use_lag_features=True)`). Lag 28 = horyzont prognozy, więc są znane ex ante
+  (bez wycieku), ale zmierzone eksperymentem **pogarszają** wyniki (val-oracle
+  MAE 652 → 705). Szereg sieciowy jest tak gładki, że te sygnały to szum, nie
+  informacja — spójne z testem udziałów kategorii w EDA (sekcja 5b). Zostają
+  w kodzie jako udokumentowany eksperyment i materiał na rozmowę.
 
 **Porównanie z LightGBM:** do projektu dodaliśmy model gradient boostingowy
 (LightGBM) na **dokładnie tych samych cechach** — to kontrolowane porównanie klas
 modeli przy tej samej informacji. Wynik: LightGBM **nie bije** regresji liniowej
-(CV MAE 862.8 vs 840.7; RMSE i MAPE też lepsze u modelu liniowego; LightGBM wygrywa
+(CV MAE 862.8 vs 835.5; RMSE i MAPE też lepsze u modelu liniowego; LightGBM wygrywa
 tylko bias). To spodziewane i pouczające: przy 760 punktach jednego, gładkiego
 szeregu elastyczność drzew daje głównie ryzyko przeuczenia, a nie dodatkową wiedzę.
 W naszym drugim projekcie (M5 Forecasting: 30 490 szeregów × 1941 dni) ta zależność

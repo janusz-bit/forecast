@@ -5,7 +5,11 @@ Architektura (pkt 3-4 zadania):
   * model główny - regresja liniowa na cechach kalendarzowych:
       - sezonowość roczna: rozwinięcie Fouriera (K=2) wg dnia roku,
       - dzień tygodnia: 6 dichotomii,
-      - epidemia: flaga dnia (efekt -36% z EDA).
+      - epidemia: flaga dnia (efekt -36% z EDA),
+      - sezon kalendarzowy (Seasonality): współbieżny bez wycieku, poprawia MAE.
+    Opcjonalnie (use_lag_features=True): cechy zewnętrzne z lagiem 28 (zapas,
+    promocja, rabat, ceny, jednostki per kategoria) - zmierzone i ODRZUCONE
+    (pogarszają wyniki), w kodzie jako udokumentowany eksperyment.
     Bez trendu liniowego: w rolling CV wariant z trendem nie poprawiał MAE,
     a ekstrapolacja trendu poza zakres treningu jest ryzykowna.
   * model porównawczy - LightGBM na DOKŁADNIE TYCH SAMYCH cechach (uczciwe
@@ -37,6 +41,7 @@ HORIZON = 28          # horyzont prognozy [dni] - zadanie: 4 tygodnie
 FOURIER_K = 2         # pary harmonicznych sezonu rocznego
 ROLLING_WINDOW = 28   # okno baseline'u (średnia krocząca)
 CV_FOLDS = 5          # foldy rolling-origin CV (po 28 dni) w obrębie treningu
+FEATURE_LAG = 28      # lag cech zewnętrznych (= horyzont => znane ex ante)
 BONUS_TOP_N = 3       # bonus: prognoza dla top N produktów
 
 OUTPUTS_DIR = Path("outputs")
@@ -51,6 +56,18 @@ def load_daily(path: Path = OUTPUTS_DIR / "daily_sales.csv") -> pd.DataFrame:
     return daily
 
 
+EXTRA_COLS = ["inventory", "promotion", "discount", "price", "competitor_price"]
+
+
+def load_daily_enriched(path: Path = OUTPUTS_DIR / "daily_sales.csv") -> pd.DataFrame:
+    """Szereg dzienny sieci + jednostki per kategoria (do cech lag-28)."""
+    daily = load_daily(path)
+    raw = load_raw()
+    cat = (raw.groupby(["Date", "Category"])["Units Sold"].sum()
+              .unstack().add_prefix("cat_").rename(columns=lambda c: c.lower()))
+    return daily.join(cat, how="left")
+
+
 def fourier_terms(index: pd.DatetimeIndex, k: int = FOURIER_K) -> dict:
     """Rozwinięcie Fouriera sezonu rocznego wg dnia roku (k par sin/cos)."""
     doy = index.dayofyear.to_numpy()
@@ -61,13 +78,53 @@ def fourier_terms(index: pd.DatetimeIndex, k: int = FOURIER_K) -> dict:
     return terms
 
 
-def make_features(index: pd.DatetimeIndex, epidemic) -> pd.DataFrame:
-    """Macierz cech: sezon roczny (Fourier), dzień tygodnia, flaga epidemii."""
+def make_features(index: pd.DatetimeIndex, epidemic,
+                  history: pd.DataFrame | None = None,
+                  use_lag_features: bool = False) -> pd.DataFrame:
+    """Macierz cech: sezon roczny (Fourier), dzień tygodnia, flaga epidemii.
+
+    Zawsze dochodzi `Seasonality` - kalendarzowy atrybut dnia (deterministyczny
+    wg daty, więc współbieżny bez wycieku). W teście z EDA poprawia MAE
+    (val 663 -> 652).
+
+    Jeśli dodatkowo podano `history` i `use_lag_features=True`, dochodzą cechy
+    z lagiem FEATURE_LAG (= horyzont prognozy, więc znane ex ante): zapas,
+    promocja, rabat, cena, cena konkurencji, jednostki per kategoria.
+    DOMYŚLNIE WYŁĄCZONE: zmierzone w eksperymencie pogarszają wyniki (val-oracle
+    MAE 652 -> 705) - szereg sieciowy jest tak gładki, że to szum, nie informacja.
+    Zostawione w kodzie jako udokumentowany eksperyment (wzgl. EDA sekcja 5b).
+    """
     X = pd.DataFrame(fourier_terms(index), index=index)
     for d in range(6):
         X[f"dow{d}"] = (index.dayofweek == d).astype(int)
     X["epidemic"] = np.asarray(epidemic, dtype=float)
-    return X
+    season = pd.Series(index, index=index).map(_season_of)
+    for s in ("Autumn", "Spring", "Summer"):      # Winter = referencja
+        X[f"season_{s.lower()}"] = (season == s).astype(float)
+    if history is None or not use_lag_features:
+        return X
+
+    idx_ext = history.index.union(index)
+    ext_cols = [c for c in EXTRA_COLS if c in history.columns]
+    if not ext_cols:                      # szereg produktu (bonus): tylko cechy bazowe
+        return X
+    ext = history[ext_cols].reindex(idx_ext).shift(FEATURE_LAG).loc[index]
+    ext.columns = [f"{c}_lag{FEATURE_LAG}" for c in ext_cols]
+    cat_cols = [c for c in history.columns if c.startswith("cat_")]
+    if cat_cols:
+        cat = history[cat_cols].reindex(idx_ext).shift(FEATURE_LAG).loc[index]
+        cat.columns = [f"{c}_lag{FEATURE_LAG}" for c in cat_cols]
+        ext = pd.concat([ext, cat], axis=1)
+    return pd.concat([X, ext], axis=1)
+
+
+def _season_of(date) -> str:
+    """Sezon astronomiczny z daty (fallback, gdy brak kolumny Seasonality)."""
+    mth, day = date.month, date.day
+    if (mth, day) >= (3, 20) and (mth, day) < (6, 21): return "Spring"
+    if (mth, day) >= (6, 21) and (mth, day) < (9, 23): return "Summer"
+    if (mth, day) >= (9, 23) and (mth, day) < (12, 21): return "Autumn"
+    return "Winter"
 
 
 def baseline_forecast(train_units: pd.Series, future_index: pd.DatetimeIndex) -> pd.Series:
@@ -76,15 +133,21 @@ def baseline_forecast(train_units: pd.Series, future_index: pd.DatetimeIndex) ->
     return pd.Series(level, index=future_index, name="baseline")
 
 
-def fit_model(daily_chunk: pd.DataFrame) -> LinearRegression:
+def fit_model(daily_chunk: pd.DataFrame,
+              use_lag_features: bool = False) -> LinearRegression:
     """Dopasowuje regresję liniową na podanym fragmencie danych."""
-    X = make_features(daily_chunk.index, daily_chunk["epidemic"])
-    return LinearRegression().fit(X, daily_chunk["units"])
+    X = make_features(daily_chunk.index, daily_chunk["epidemic"], history=daily_chunk,
+                      use_lag_features=use_lag_features)
+    ok = X.notna().all(axis=1)          # pierwsze FEATURE_LAG dni nie mają lagów
+    return LinearRegression().fit(X[ok], daily_chunk.loc[ok, "units"])
 
 
-def predict(model: LinearRegression, index: pd.DatetimeIndex, epidemic) -> pd.Series:
+def predict(model: LinearRegression, index: pd.DatetimeIndex, epidemic,
+            history: pd.DataFrame | None = None,
+            use_lag_features: bool = False) -> pd.Series:
     """Prognoza modelu dla podanych dat i scenariusza epidemii (flaga lub seria)."""
-    X = make_features(index, epidemic)
+    X = make_features(index, epidemic, history=history,
+                      use_lag_features=use_lag_features)
     return pd.Series(model.predict(X), index=index, name="model")
 
 
@@ -94,20 +157,26 @@ LGBM_PARAMS = dict(
 )
 
 
-def fit_lgbm(daily_chunk: pd.DataFrame) -> lgb.LGBMRegressor:
+def fit_lgbm(daily_chunk: pd.DataFrame, use_lag_features: bool = False) -> lgb.LGBMRegressor:
     """Dopasowuje LightGBM na TYCH SAMYCH cechach co regresję liniową.
 
     Cel: uczciwe porównanie klas modeli przy tej samej informacji (sezon roczny,
     dzień tygodnia, epidemia). Parametry celowo konserwatywne - 760 punktów
     jednego szeregu to mało danych na głębokie drzewa.
     """
-    X = make_features(daily_chunk.index, daily_chunk["epidemic"])
-    return lgb.LGBMRegressor(**LGBM_PARAMS).fit(X, daily_chunk["units"])
+    X = make_features(daily_chunk.index, daily_chunk["epidemic"], history=daily_chunk,
+                      use_lag_features=use_lag_features)
+    ok = X.notna().all(axis=1)
+    return lgb.LGBMRegressor(**LGBM_PARAMS).fit(X[ok], daily_chunk.loc[ok, "units"])
 
 
-def predict_lgbm(model: lgb.LGBMRegressor, index: pd.DatetimeIndex, epidemic) -> pd.Series:
+def predict_lgbm(model: lgb.LGBMRegressor, index: pd.DatetimeIndex, epidemic,
+                 history: pd.DataFrame | None = None,
+                 use_lag_features: bool = False) -> pd.Series:
     """Prognoza LightGBM dla podanych dat i scenariusza epidemii."""
-    X = make_features(index, epidemic)
+    X = make_features(index, epidemic, history=history,
+                      use_lag_features=use_lag_features)
+    return pd.Series(model.predict(X), index=index, name="lgbm").clip(lower=0)
     return pd.Series(model.predict(X), index=index, name="lgbm").clip(lower=0)
 
 
@@ -135,10 +204,10 @@ def rolling_origin_cv(daily: pd.DataFrame, n_folds: int = CV_FOLDS,
     for cut in starts:
         tr, te = daily.iloc[:cut], daily.iloc[cut:cut + horizon]
         base_scores.append(score(baseline_forecast(tr["units"], te.index), te["units"]))
-        model_scores.append(score(predict(fit_model(tr), te.index, epidemic=0.0),
-                                  te["units"]))
-        lgbm_scores.append(score(predict_lgbm(fit_lgbm(tr), te.index, epidemic=0.0),
-                                 te["units"]))
+        model_scores.append(score(predict(fit_model(tr), te.index, epidemic=0.0,
+                                          history=tr), te["units"]))
+        lgbm_scores.append(score(predict_lgbm(fit_lgbm(tr), te.index, epidemic=0.0,
+                                              history=tr), te["units"]))
     # średnia po foldach (RMSE: średnia z RMSE foldów, nie pooled)
     def mean_scores(scores: list) -> dict:
         return {k: float(np.mean([s[k] for s in scores])) for k in scores[0]}
@@ -193,32 +262,32 @@ def run_bonus(daily_full: pd.DataFrame, horizon: int = HORIZON) -> tuple[pd.Data
 
 
 def main() -> None:
-    daily = load_daily()
+    daily = load_daily_enriched()
     train, val = daily.iloc[:-HORIZON], daily.iloc[-HORIZON:]
 
     # --- walidacja: fit na treningu, prognoza ostatnich 28 dni ---
     model = fit_model(train)
     val_base = baseline_forecast(train["units"], val.index)
-    val_ep0 = predict(model, val.index, epidemic=0.0)                    # scenariusz domyślny
-    val_ep1 = predict(model, val.index, epidemic=1.0)                    # scenariusz "trwa"
-    val_ep_actual = predict(model, val.index, epidemic=val["epidemic"])  # oracle (tylko ocena)
+    val_ep0 = predict(model, val.index, epidemic=0.0, history=train)     # scenariusz domyślny
+    val_ep1 = predict(model, val.index, epidemic=1.0, history=train)     # scenariusz "trwa"
+    val_ep_actual = predict(model, val.index, epidemic=val["epidemic"], history=train)
 
     # --- LightGBM: porównanie (te same cechy, te same scenariusze) ---
     lgbm = fit_lgbm(train)
-    lgbm_ep0 = predict_lgbm(lgbm, val.index, epidemic=0.0)
-    lgbm_ep1 = predict_lgbm(lgbm, val.index, epidemic=1.0)
-    lgbm_ep_actual = predict_lgbm(lgbm, val.index, epidemic=val["epidemic"])
+    lgbm_ep0 = predict_lgbm(lgbm, val.index, epidemic=0.0, history=train)
+    lgbm_ep1 = predict_lgbm(lgbm, val.index, epidemic=1.0, history=train)
+    lgbm_ep_actual = predict_lgbm(lgbm, val.index, epidemic=val["epidemic"], history=train)
 
     # --- prognoza produkcyjna: 28 dni po końcu danych, fit na pełnej historii ---
     model_full = fit_model(daily)
     future_index = pd.date_range(daily.index[-1] + pd.Timedelta(days=1),
                                  periods=HORIZON, freq="D")
     fut_base = baseline_forecast(daily["units"], future_index)
-    fut_ep0 = predict(model_full, future_index, epidemic=0.0)
-    fut_ep1 = predict(model_full, future_index, epidemic=1.0)
+    fut_ep0 = predict(model_full, future_index, epidemic=0.0, history=daily)
+    fut_ep1 = predict(model_full, future_index, epidemic=1.0, history=daily)
     lgbm_full = fit_lgbm(daily)
-    fut_lgbm_ep0 = predict_lgbm(lgbm_full, future_index, epidemic=0.0)
-    fut_lgbm_ep1 = predict_lgbm(lgbm_full, future_index, epidemic=1.0)
+    fut_lgbm_ep0 = predict_lgbm(lgbm_full, future_index, epidemic=0.0, history=daily)
+    fut_lgbm_ep1 = predict_lgbm(lgbm_full, future_index, epidemic=1.0, history=daily)
 
     # --- outputs/forecast.csv (kontrakt aplikacji) ---
     out = pd.concat([
