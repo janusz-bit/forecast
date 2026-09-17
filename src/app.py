@@ -1,0 +1,123 @@
+"""Aplikacja Streamlit: prognoza sprzedaży sieci na 4 tygodnie.
+
+Tylko czyta wyliczone pliki z outputs/ (kontrakt: forecast.csv, metrics.csv,
+daily_sales.csv) - nic nie liczy i nie trenuje przy starcie.
+
+Uruchomienie: uv run streamlit run src/app.py
+"""
+
+from pathlib import Path
+
+import pandas as pd
+import plotly.graph_objects as go
+import streamlit as st
+
+OUTPUTS_DIR = Path("outputs")
+
+st.set_page_config(page_title="Prognoza sprzedaży", layout="wide")
+st.title("Prognoza sprzedaży sieci detalicznej")
+st.caption("Dane: Kaggle *Demand forecasting dataset* | horyzont: 28 dni | "
+           "prognoza na poziomie całej sieci")
+
+
+@st.cache_data
+def load_forecast() -> pd.DataFrame:
+    """Wczytuje forecast.csv (cache - odczyt raz na uruchomienie aplikacji)."""
+    df = pd.read_csv(OUTPUTS_DIR / "forecast.csv", parse_dates=["Date"], index_col="Date")
+    return df.sort_index()
+
+
+@st.cache_data
+def load_metrics() -> pd.DataFrame:
+    """Wczytuje metrics.csv (długi format: model × okno × scenariusz)."""
+    return pd.read_csv(OUTPUTS_DIR / "metrics.csv")
+
+
+forecast = load_forecast()
+metrics = load_metrics()
+
+st.sidebar.header("Fragmentator")
+
+# --- zakres dat ---
+hist_start = forecast.index.min().date()
+end_date = forecast.index.max().date()
+default_start = end_date - pd.Timedelta(days=90)
+date_range = st.sidebar.date_input(
+    "Zakres dat",
+    value=(default_start, end_date),
+    min_value=hist_start,
+    max_value=end_date,
+)
+
+# --- scenariusz epidemii ---
+scenario = st.sidebar.radio(
+    "Scenariusz epidemii (prognoza)",
+    ("bez epidemii", "epidemia trwa"),
+    help="Epidemia jest nieznana ex ante - prognoza bazuje na założeniu "
+         "o jej przebiegu w oknie prognozy.",
+)
+model_col = "model_ep0" if scenario == "bez epidemii" else "model_ep1"
+
+# --- filtr dat ---
+if len(date_range) == 2:
+    lo, hi = pd.Timestamp(date_range[0]), pd.Timestamp(date_range[1])
+    view = forecast.loc[lo:hi]
+else:
+    view = forecast
+
+# --- wykres ---
+fig = go.Figure()
+hist = view[view["actual"].notna()]
+fig.add_trace(go.Scattergl(  # type: ignore[attr-defined]
+    x=hist.index, y=hist["actual"], name="Rzeczywista sprzedaż",
+    line=dict(color="#1f77b4", width=1.5)))
+fig.add_vrect(
+    x0=hist.index.max() - pd.Timedelta(days=28), x1=hist.index.max(),
+    fillcolor="rgba(0,0,0,0.06)", line_width=0,
+    annotation_text="walidacja", annotation_position="top left")
+
+fut = view[view["baseline"].notna()]
+fig.add_trace(go.Scatter(
+    x=fut.index, y=fut["baseline"], name="Baseline (średnia krocząca 28d)",
+    line=dict(color="#ff7f0e", width=1.5, dash="dot")))
+fig.add_trace(go.Scatter(
+    x=fut.index, y=fut[model_col], name=f"Model ({scenario})",
+    line=dict(color="#2ca02c", width=2)))
+
+fig.update_layout(
+    height=460, margin=dict(l=10, r=10, t=30, b=10),
+    legend=dict(orientation="h", y=1.08, x=0),
+    yaxis_title="sztuki / dzień", xaxis_title=None,
+)
+st.plotly_chart(fig, use_container_width=True)
+
+# --- tabela metryk ---
+st.subheader("Metryki jakości prognozy (walidacja: ostatnie 28 dni)")
+met_view = metrics.copy()
+for col in ("MAE", "RMSE", "MAPE", "bias"):
+    met_view[col] = met_view[col].round(1)
+st.dataframe(met_view, use_container_width=True, hide_index=True)
+
+with st.expander("Jak czytać metryki?"):
+    st.markdown(
+        "- **MAE** - średni błąd bezwzględny (sztuki/dzień);\n"
+        "- **RMSE** - jak MAE, ale duże pomyłki ważą bardziej (szt./dzień);\n"
+        "- **MAPE** - średni błąd względny (%);\n"
+        "- **bias** - średni błąd (predykcja − rzeczywistość); dodatni = "
+        "przeszacowanie sprzedaży.\n\n"
+        "Scenariusz *epidemia_rzeczywista* (oracle) pokazuje, jak wyglądałaby "
+        "prognoza ze znanym harmonogramem epidemii - w praktyce status epidemii "
+        "jest ogłaszany z wyprzedzeniem. Szczegóły: README oraz rolling-origin "
+        "CV w `outputs/metrics.csv` (okno cv5_mean)."
+    )
+
+# --- prognoza na przyszłość: tabela ---
+st.subheader("Prognoza na najbliższe 4 tygodnie (po końcu danych)")
+future = forecast[forecast["split"] == "future"][["baseline", model_col]].copy()
+future.columns = ["Baseline (28d śr.)", "Model"]
+st.dataframe(
+    future.round(0).style.format("{:,.0f}"),
+    use_container_width=True,
+)
+st.caption(f"Suma prognozy modelu na 28 dni: {future['Model'].sum():,.0f} szt. "
+           f"(baseline: {future['Baseline (28d śr.)'].sum():,.0f} szt.)")
