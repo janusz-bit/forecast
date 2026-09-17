@@ -83,6 +83,30 @@ else:
 n_ep_days = 0 if not ep_on else (ep_range[1] - ep_range[0]).days + 1
 st.sidebar.caption(f"Epidemia obejmie **{n_ep_days}** z 28 dni prognozy.")
 
+# --- drugi przesuwak: epidemia w oknie WALIDACJI (własny scenariusz "co jeśli") ---
+val_df = forecast[forecast["split"] == "val"]
+val_min, val_max = val_df.index.min().date(), val_df.index.max().date()
+
+val_ep_on = st.sidebar.checkbox("Epidemia w walidacji (własny scenariusz)",
+                                value=False,
+                                help="Ustaw własny przebieg epidemii w 28 dniach "
+                                     "walidacji i zobacz, jak zmienia się błąd "
+                                     "prognozy modelu (metryki liczone na żywo "
+                                     "z gotowych prognoz - model nie jest uczony "
+                                     "ponownie).")
+if val_ep_on:
+    val_ep_range = st.sidebar.slider(
+        "Dni epidemiczne (walidacja)",
+        min_value=val_min, max_value=val_max,
+        value=(val_min, min(pd.Timestamp(val_min) + pd.Timedelta(days=5), pd.Timestamp(val_max)).date()),
+        format="DD.MM.YYYY",
+    )
+else:
+    val_ep_range = None
+
+val_n_ep = 0 if not val_ep_on else (val_ep_range[1] - val_ep_range[0]).days + 1
+st.sidebar.caption(f"Walidacja: epidemia w **{val_n_ep}** z 28 dni (wg danych: 6).")
+
 # --- filtr dat ---
 if len(date_range) == 2:
     lo, hi = pd.Timestamp(date_range[0]), pd.Timestamp(date_range[1])
@@ -122,6 +146,18 @@ fig.add_trace(go.Scatter(
     x=view[view["model_ep_actual"].notna()].index,
     y=view["model_ep_actual"].dropna(), name="Model (walidacja, epidemia wg danych)",
     line=dict(color="#F472B6", width=2)))
+
+# walidacja wg WŁASNEGO scenariusza użytkownika (ta sama sztuczka liniowości)
+val_flag = pd.Series(0.0, index=val_df.index)
+if val_ep_on and val_ep_range[0] <= val_ep_range[1]:
+    val_flag[(val_flag.index >= pd.Timestamp(val_ep_range[0]))
+             & (val_flag.index <= pd.Timestamp(val_ep_range[1]))] = 1.0
+val_model_user = (val_df["model_ep0"]
+                  + (val_df["model_ep1"] - val_df["model_ep0"]) * val_flag)
+fig.add_trace(go.Scatter(
+    x=val_df.index, y=val_model_user,
+    name="Model (walidacja: TWÓJ scenariusz epidemii)",
+    line=dict(color="#FB7185", width=2, dash="dashdot")))
 fig.add_trace(go.Scatter(
     x=fut_all.index, y=model_dynamic,
     name="Model (prognoza: przesuwak epidemii)",
@@ -145,6 +181,28 @@ met_view = metrics.copy()
 for col in ("MAE", "RMSE", "MAPE", "bias"):
     met_view[col] = met_view[col].round(1)
 st.dataframe(met_view, width="stretch", hide_index=True)
+
+# metryki WŁASNEGO scenariusza epidemii w walidacji (na żywo, bez uczenia modelu)
+if val_ep_on:
+    err = val_model_user - val_df["actual"]
+    mae_u = err.abs().mean()
+    rmse_u = (err ** 2).mean() ** 0.5
+    mape_u = (err.abs() / val_df["actual"]).mean() * 100
+    bias_u = err.mean()
+    mae_actual = (val_df["model_ep_actual"] - val_df["actual"]).abs().mean()
+    delta = mae_u - mae_actual
+    if abs(delta) < 0.5:
+        verdict = ("to dokładnie scenariusz 'epidemia wg danych' — trafiłeś w "
+                   "rzeczywisty przebieg epidemii")
+    else:
+        verdict = (f"to {'gorzej' if delta > 0 else 'lepiej'} o {abs(delta):,.0f} "
+                   f"szt./dzień niż scenariusz 'epidemia wg danych' "
+                   f"(MAE {mae_actual:,.0f}). Przesuń zakres, aby błąd zminimalizować.")
+    st.caption(
+        f"**Twój scenariusz** ({val_n_ep} dni epidemii): MAE **{mae_u:,.0f}**, "
+        f"RMSE **{rmse_u:,.0f}**, MAPE **{mape_u:.1f}%**, bias **{bias_u:+,.0f}** — "
+        f"{verdict}"
+    )
 
 with st.expander("Jak czytać metryki?"):
     st.markdown(
