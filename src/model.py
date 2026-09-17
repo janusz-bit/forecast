@@ -8,6 +8,9 @@ Architektura (pkt 3-4 zadania):
       - epidemia: flaga dnia (efekt -36% z EDA).
     Bez trendu liniowego: w rolling CV wariant z trendem nie poprawiał MAE,
     a ekstrapolacja trendu poza zakres treningu jest ryzykowna.
+  * model porównawczy - LightGBM na DOKŁADNIE TYCH SAMYCH cechach (uczciwe
+    porównanie: czy elastyczny model bije liniowy przy 760 punktach jednego
+    szeregu). Parametry ostrożne (płytkie drzewa), by nie przeuczyć małych danych.
 
 Epidemia jest zmienną NIEZNANĄ ex ante - dlatego prognoza powstaje w wariantach
 scenariuszowych: "bez epidemii" (domyślny) i "epidemia trwa". Na oknie walidacji
@@ -20,6 +23,7 @@ Prognoza produkcyjna: 28 dni po końcu danych, model dopasowany na pełnej histo
 
 from pathlib import Path
 
+import lightgbm as lgb
 import numpy as np
 import pandas as pd
 from sklearn.linear_model import LinearRegression
@@ -84,6 +88,29 @@ def predict(model: LinearRegression, index: pd.DatetimeIndex, epidemic) -> pd.Se
     return pd.Series(model.predict(X), index=index, name="model")
 
 
+LGBM_PARAMS = dict(
+    n_estimators=300, num_leaves=15, learning_rate=0.05, min_child_samples=20,
+    subsample=0.9, colsample_bytree=0.9, random_state=0, n_jobs=1, verbose=-1,
+)
+
+
+def fit_lgbm(daily_chunk: pd.DataFrame) -> lgb.LGBMRegressor:
+    """Dopasowuje LightGBM na TYCH SAMYCH cechach co regresję liniową.
+
+    Cel: uczciwe porównanie klas modeli przy tej samej informacji (sezon roczny,
+    dzień tygodnia, epidemia). Parametry celowo konserwatywne - 760 punktów
+    jednego szeregu to mało danych na głębokie drzewa.
+    """
+    X = make_features(daily_chunk.index, daily_chunk["epidemic"])
+    return lgb.LGBMRegressor(**LGBM_PARAMS).fit(X, daily_chunk["units"])
+
+
+def predict_lgbm(model: lgb.LGBMRegressor, index: pd.DatetimeIndex, epidemic) -> pd.Series:
+    """Prognoza LightGBM dla podanych dat i scenariusza epidemii."""
+    X = make_features(index, epidemic)
+    return pd.Series(model.predict(X), index=index, name="lgbm").clip(lower=0)
+
+
 def score(pred: pd.Series, actual: pd.Series) -> dict:
     """Metryki: MAE, RMSE, MAPE (%), bias (szt.; dodatni = przeszacowanie)."""
     err = pred - actual
@@ -104,17 +131,20 @@ def rolling_origin_cv(daily: pd.DataFrame, n_folds: int = CV_FOLDS,
     Zwraca {nazwa_modelu: {"MAE": średnia po foldach}}.
     """
     starts = [len(daily) - 2 * horizon - i * horizon for i in range(n_folds, 0, -1)]
-    base_scores, model_scores = [], []
+    base_scores, model_scores, lgbm_scores = [], [], []
     for cut in starts:
         tr, te = daily.iloc[:cut], daily.iloc[cut:cut + horizon]
         base_scores.append(score(baseline_forecast(tr["units"], te.index), te["units"]))
         model_scores.append(score(predict(fit_model(tr), te.index, epidemic=0.0),
                                   te["units"]))
+        lgbm_scores.append(score(predict_lgbm(fit_lgbm(tr), te.index, epidemic=0.0),
+                                 te["units"]))
     # średnia po foldach (RMSE: średnia z RMSE foldów, nie pooled)
     def mean_scores(scores: list) -> dict:
         return {k: float(np.mean([s[k] for s in scores])) for k in scores[0]}
     return {"baseline": mean_scores(base_scores),
-            "model_bez_epidemii": mean_scores(model_scores)}
+            "model_bez_epidemii": mean_scores(model_scores),
+            "lgbm_bez_epidemii": mean_scores(lgbm_scores)}
 
 
 def product_series(raw: pd.DataFrame, product_id: str) -> pd.DataFrame:
@@ -173,6 +203,12 @@ def main() -> None:
     val_ep1 = predict(model, val.index, epidemic=1.0)                    # scenariusz "trwa"
     val_ep_actual = predict(model, val.index, epidemic=val["epidemic"])  # oracle (tylko ocena)
 
+    # --- LightGBM: porównanie (te same cechy, te same scenariusze) ---
+    lgbm = fit_lgbm(train)
+    lgbm_ep0 = predict_lgbm(lgbm, val.index, epidemic=0.0)
+    lgbm_ep1 = predict_lgbm(lgbm, val.index, epidemic=1.0)
+    lgbm_ep_actual = predict_lgbm(lgbm, val.index, epidemic=val["epidemic"])
+
     # --- prognoza produkcyjna: 28 dni po końcu danych, fit na pełnej historii ---
     model_full = fit_model(daily)
     future_index = pd.date_range(daily.index[-1] + pd.Timedelta(days=1),
@@ -180,6 +216,9 @@ def main() -> None:
     fut_base = baseline_forecast(daily["units"], future_index)
     fut_ep0 = predict(model_full, future_index, epidemic=0.0)
     fut_ep1 = predict(model_full, future_index, epidemic=1.0)
+    lgbm_full = fit_lgbm(daily)
+    fut_lgbm_ep0 = predict_lgbm(lgbm_full, future_index, epidemic=0.0)
+    fut_lgbm_ep1 = predict_lgbm(lgbm_full, future_index, epidemic=1.0)
 
     # --- outputs/forecast.csv (kontrakt aplikacji) ---
     out = pd.concat([
@@ -200,6 +239,14 @@ def main() -> None:
     # epidemia wg danych (tylko walidacja): linia modelu do wykresu w aplikacji
     out["model_ep_actual"] = np.nan
     out.loc[val.index, "model_ep_actual"] = val_ep_actual.values
+    out["lgbm_ep0"] = np.nan
+    out.loc[val.index, "lgbm_ep0"] = lgbm_ep0.values
+    out.loc[future_index, "lgbm_ep0"] = fut_lgbm_ep0.values
+    out["lgbm_ep1"] = np.nan
+    out.loc[val.index, "lgbm_ep1"] = lgbm_ep1.values
+    out.loc[future_index, "lgbm_ep1"] = fut_lgbm_ep1.values
+    out["lgbm_ep_actual"] = np.nan
+    out.loc[val.index, "lgbm_ep_actual"] = lgbm_ep_actual.values
     out.index.name = "Date"
     OUTPUTS_DIR.mkdir(exist_ok=True)
     out.to_csv(OUTPUTS_DIR / "forecast.csv")
@@ -212,11 +259,17 @@ def main() -> None:
          **score(val_ep0, val["units"])},
         {"model": "model", "window": "val", "scenario": "epidemia_rzeczywista",
          **score(val_ep_actual, val["units"])},
+        {"model": "lgbm", "window": "val", "scenario": "bez_epidemii",
+         **score(lgbm_ep0, val["units"])},
+        {"model": "lgbm", "window": "val", "scenario": "epidemia_rzeczywista",
+         **score(lgbm_ep_actual, val["units"])},
     ]
     cv = rolling_origin_cv(train)
     rows.append({"model": "baseline", "window": "cv5_mean", "scenario": "-", **cv["baseline"]})
     rows.append({"model": "model", "window": "cv5_mean", "scenario": "bez_epidemii",
                  **cv["model_bez_epidemii"]})
+    rows.append({"model": "lgbm", "window": "cv5_mean", "scenario": "bez_epidemii",
+                 **cv["lgbm_bez_epidemii"]})
     metrics = pd.DataFrame(rows)
     metrics.to_csv(OUTPUTS_DIR / "metrics.csv", index=False)
 

@@ -87,6 +87,9 @@ realistyczny wariant.
 | model | val | rzeczywista epidemia | **663.1** | **809.4** | **7.9%** | +391 |
 | baseline | CV (5×28d) | — | 890.9 | 1162.9 | 11.8% | +484 |
 | model | CV (5×28d) | bez epidemii | **840.7** | **1115.0** | **11.4%** | +410 |
+| LightGBM | val | bez epidemii | 1244.3 | 1665.0 | 17.5% | +944 |
+| LightGBM | val | rzeczywista epidemia | 665.7 | 807.1 | 7.9% | **+271** |
+| LightGBM | CV (5×28d) | bez epidemii | 862.8 | 1164.9 | 11.6% | **+384** |
 
 **Interpretacja (uczciwie):**
 - Na tym konkretnym oknie walidacji 6 z 28 dni to dni epidemiczne — scenariusz
@@ -97,6 +100,16 @@ realistyczny wariant.
   vs 1053; MAPE 7.9% vs 14.4%).
 - W rolling-origin CV (5 foldów w treningu, scenariusz ex ante) model wygrywa
   wszystkie 4 metryki — to najuczciwszy obraz średniej jakości.
+
+**Porównanie z LightGBM:** do projektu dodaliśmy model gradient boostingowy
+(LightGBM) na **dokładnie tych samych cechach** — to kontrolowane porównanie klas
+modeli przy tej samej informacji. Wynik: LightGBM **nie bije** regresji liniowej
+(CV MAE 862.8 vs 840.7; RMSE i MAPE też lepsze u modelu liniowego; LightGBM wygrywa
+tylko bias). To spodziewane i pouczające: przy 760 punktach jednego, gładkiego
+szeregu elastyczność drzew daje głównie ryzyko przeuczenia, a nie dodatkową wiedzę.
+W naszym drugim projekcie (M5 Forecasting: 30 490 szeregów × 1941 dni) ta zależność
+jest odwrotna — tam LightGBM ma masę danych i wygrywa. **Wniosek na rozmowę:
+wybór modelu podlega skali danych; cechy są ważniejsze niż klasa modelu.**
 
 ### Bonus: prognozy dla top-3 produktów
 
