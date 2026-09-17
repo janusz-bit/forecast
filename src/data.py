@@ -45,6 +45,7 @@ def aggregate_daily(df: pd.DataFrame) -> pd.DataFrame:
         demand=("Demand", "sum"), # popyt (cenzurowany zapasem): suma
 
         epidemic=("Epidemic", "max"), # czy była epidemia
+        seasonality=("Seasonality", "first"), # pora roku (deterministyczna per data)
         promotion=("Promotion", "mean"), # Czy była "naklejka promocja"
         discount=("Discount", "mean"), # Jaki była obniżka
         # Trzeba przemyśleć czy średnia ważona (dane historyczne, wyliczyć wagi koszyka, czy w inny sposób)
@@ -53,6 +54,8 @@ def aggregate_daily(df: pd.DataFrame) -> pd.DataFrame:
         inventory=("Inventory Level", "sum"), # Liczba na sklepie
     )
     daily.index.name = "Date"
+    bad = set(daily["seasonality"].unique()) - {"Winter", "Spring", "Summer", "Autumn"}
+    assert not bad, f"Nieznane etykiety sezonu: {bad}"
     return daily
 
 

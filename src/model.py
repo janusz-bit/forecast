@@ -6,7 +6,7 @@ Architektura (pkt 3-4 zadania):
       - sezonowość roczna: rozwinięcie Fouriera (K=2) wg dnia roku,
       - dzień tygodnia: 6 dichotomii,
       - epidemia: flaga dnia (efekt -36% z EDA),
-      - sezon kalendarzowy (Seasonality): współbieżny bez wycieku, poprawia MAE.
+      - sezon (Seasonality z danych): współbieżny bez wycieku, poprawia MAE.
     Opcjonalnie (use_lag_features=True): cechy zewnętrzne z lagiem 28 (zapas,
     promocja, rabat, ceny, jednostki per kategoria) - zmierzone i ODRZUCONE
     (pogarszają wyniki), w kodzie jako udokumentowany eksperyment.
@@ -50,7 +50,7 @@ OUTPUTS_DIR = Path("outputs")
 def load_daily(path: Path = OUTPUTS_DIR / "daily_sales.csv") -> pd.DataFrame:
     """Wczytuje zagregowany szereg dzienny z outputs/daily_sales.csv."""
     daily = pd.read_csv(path, parse_dates=["Date"], index_col="Date").sort_index()
-    missing = {"units", "epidemic"} - set(daily.columns)
+    missing = {"units", "epidemic", "seasonality"} - set(daily.columns)
     if missing:
         raise ValueError(f"Brak kolumn w {path}: {missing} - uruchom najpierw src/data.py")
     return daily
@@ -83,9 +83,10 @@ def make_features(index: pd.DatetimeIndex, epidemic,
                   use_lag_features: bool = False) -> pd.DataFrame:
     """Macierz cech: sezon roczny (Fourier), dzień tygodnia, flaga epidemii.
 
-    Zawsze dochodzi `Seasonality` - kalendarzowy atrybut dnia (deterministyczny
-    wg daty, więc współbieżny bez wycieku). W teście z EDA poprawia MAE
-    (val 663 -> 652).
+    Zawsze dochodzi sezon: etykieta `Seasonality` z danych (deterministyczna
+    per data, więc współbieżna bez wycieku), a dla dat poza danymi (horyzont
+    prognozy) reguła meteorologiczna, z danymi zgodna 1:1. W teście A/B
+    poprawia MAE we wszystkich wariantach (liczby w README).
 
     Jeśli dodatkowo podano `history` i `use_lag_features=True`, dochodzą cechy
     z lagiem FEATURE_LAG (= horyzont prognozy, więc znane ex ante): zapas,
@@ -98,7 +99,13 @@ def make_features(index: pd.DatetimeIndex, epidemic,
     for d in range(6):
         X[f"dow{d}"] = (index.dayofweek == d).astype(int)
     X["epidemic"] = np.asarray(epidemic, dtype=float)
-    season = pd.Series(index, index=index).map(_season_of)
+    # sezon: etykieta z danych (kolumna Seasonality), a dla dat poza danymi
+    # (horyzont prognozy) reguła meteorologiczna - z danymi zgodna 1:1
+    if history is not None and "seasonality" in history.columns:
+        season = history["seasonality"].reindex(index)
+    else:
+        season = pd.Series(np.nan, index=index)
+    season = season.fillna(pd.Series(index, index=index).map(_season_meteorological))
     for s in ("Autumn", "Spring", "Summer"):      # Winter = referencja
         X[f"season_{s.lower()}"] = (season == s).astype(float)
     if history is None or not use_lag_features:
@@ -118,12 +125,13 @@ def make_features(index: pd.DatetimeIndex, epidemic,
     return pd.concat([X, ext], axis=1)
 
 
-def _season_of(date) -> str:
-    """Sezon astronomiczny z daty (fallback, gdy brak kolumny Seasonality)."""
-    mth, day = date.month, date.day
-    if (mth, day) >= (3, 20) and (mth, day) < (6, 21): return "Spring"
-    if (mth, day) >= (6, 21) and (mth, day) < (9, 23): return "Summer"
-    if (mth, day) >= (9, 23) and (mth, day) < (12, 21): return "Autumn"
+def _season_meteorological(date) -> str:
+    """Sezon meteorologiczny z daty (zima XII-II, wiosna III-V, lato VI-VIII,
+    jesień IX-XI) - dla dat poza danymi; z kolumną Seasonality zgadza się 1:1."""
+    m = date.month
+    if m in (3, 4, 5): return "Spring"
+    if m in (6, 7, 8): return "Summer"
+    if m in (9, 10, 11): return "Autumn"
     return "Winter"
 
 
@@ -224,14 +232,15 @@ def product_series(raw: pd.DataFrame, product_id: str) -> pd.DataFrame:
     """Dzienny szereg jednego produktu (suma po sklepach) z flagą epidemii."""
     sub = raw[raw["Product ID"] == product_id]
     return (sub.groupby("Date")
-               .agg(units=("Units Sold", "sum"), epidemic=("Epidemic", "max"))
+               .agg(units=("Units Sold", "sum"), epidemic=("Epidemic", "max"),
+                    seasonality=("Seasonality", "first"))
                .sort_index())
 
 
 def run_bonus(daily_full: pd.DataFrame, horizon: int = HORIZON) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Bonus: prognozy dla top-3 produktów wg łącznej sprzedaży.
 
-    Dla każdego produktu: ten sam model (Fourier + DOW + epidemia), walidacja
+    Dla każdego produktu: ten sam model (Fourier + DOW + epidemia + sezon), walidacja
     na ostatnich `horizon` dniach i prognoza produkcyjna (scenariusz bez
     epidemii). Zwraca (forecast_products, metrics_products).
     """
@@ -242,7 +251,7 @@ def run_bonus(daily_full: pd.DataFrame, horizon: int = HORIZON) -> tuple[pd.Data
         s = product_series(raw, pid)
         train, val = s.iloc[:-horizon], s.iloc[-horizon:]
         model = fit_model(train)
-        val_ep0 = predict(model, val.index, epidemic=0.0)
+        val_ep0 = predict(model, val.index, epidemic=0.0, history=train)
         val_base = baseline_forecast(train["units"], val.index)
         model_full = fit_model(s)
         fut_idx = pd.date_range(s.index[-1] + pd.Timedelta(days=1),
@@ -252,7 +261,8 @@ def run_bonus(daily_full: pd.DataFrame, horizon: int = HORIZON) -> tuple[pd.Data
                           "baseline": val_base, "model_ep0": val_ep0}),
             pd.DataFrame({"product_id": pid, "split": "future", "actual": np.nan,
                           "baseline": baseline_forecast(s["units"], fut_idx),
-                          "model_ep0": predict(model_full, fut_idx, epidemic=0.0)},
+                          "model_ep0": predict(model_full, fut_idx, epidemic=0.0,
+                                               history=s)},
                          index=fut_idx),
         ]
         fc_parts.extend(parts)

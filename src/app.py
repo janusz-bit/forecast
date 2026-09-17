@@ -66,10 +66,10 @@ future_df = forecast[forecast["split"] == "future"]
 fut_min, fut_max = future_df.index.min().date(), future_df.index.max().date()
 
 ep_on = st.sidebar.checkbox("Epidemia w oknie prognozy", value=False,
-                            help="Przesuń, w których dniach prognozy (28 dni po "
-                                 "końcu danych) ma obowiązywać epidemia. Model "
-                                 "reaguje natychmiast (prognoza jest liniowa "
-                                 "względem flagi epidemii).")
+                            help="Zaznacz, jeśli w oknie prognozy (28 dni po końcu "
+                                 "danych) ma obowiązywać epidemia — zakres dni "
+                                 "wybierzesz poniżej. Model reaguje natychmiast "
+                                 "(prognoza jest liniowa względem flagi epidemii).")
 if ep_on:
     ep_range = st.sidebar.slider(
         "Dni epidemiczne",

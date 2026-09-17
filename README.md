@@ -18,7 +18,7 @@ Agregacja do **dziennego szeregu sieciowego**: suma `Units Sold` po sklepach i p
 nix develop              # środowisko: uv + git (nixpkgs, spikowane w flake.lock)
 uv sync --frozen         # zależności Pythona dokładnie z uv.lock
 uv run python src/data.py                      # pobranie + agregacja → outputs/daily_sales.csv
-uv run streamlit run src/app.py                # (docelowo) aplikacja
+uv run streamlit run src/app.py                # aplikacja webowa
 ```
 
 Bez Nixa: wystarczy `uv sync --frozen` (Python ≥ 3.10).
@@ -66,7 +66,8 @@ Kod: [`src/model.py`](src/model.py). Pełny pipeline: `src/data.py` → agregacj
 **Baseline** (obowiązkowy punkt odniesienia): średnia krocząca z ostatnich 28 dni, prognoza płaska.
 
 **Model główny**: regresja liniowa na cechach kalendarzowych — sezonowość roczna
-(rozwinięcie Fouriera K=2 wg dnia roku), dzień tygodnia (6 dichotomii) i flaga epidemii.
+(rozwinięcie Fouriera K=2 wg dnia roku), dzień tygodnia (6 dichotomii), flaga epidemii
+i sezon (etykieta `Seasonality` z danych).
 Bez trendu liniowego: w rolling CV wariant z trendem nie poprawiał MAE, a ekstrapolacja
 trendu poza zakres treningu jest ryzykowna.
 
@@ -83,40 +84,46 @@ realistyczny wariant.
 | model | okno | scenariusz | MAE | RMSE | MAPE | MPE | bias |
 |---|---|---|---|---|---|---|---|
 | baseline | val | — | 1053.5 | 1417.9 | 14.4% | 6.0% | +226 |
-| model | val | bez epidemii | 1298.8 | 1751.6 | 18.5% | 16.8% | +1121 |
-| model | val | rzeczywista epidemia | **652.5** | **798.1** | **7.8%** | 4.3% | +361 |
-| LightGBM | val | bez epidemii | 1231.9 | 1642.9 | 17.3% | 14.4% | +936 |
-| LightGBM | val | rzeczywista epidemia | 669.1 | 808.0 | 8.0% | 3.5% | **+268** |
+| model | val | bez epidemii | 1284.4 | 1748.6 | 18.3% | 16.1% | +1060 |
+| model | val | rzeczywista epidemia | **630.2** | **762.8** | **7.5%** | 3.8% | +307 |
+| LightGBM | val | bez epidemii | 1226.5 | 1640.1 | 17.3% | 14.3% | +930 |
+| LightGBM | val | rzeczywista epidemia | 670.4 | 807.1 | 8.1% | 3.5% | **+265** |
 | baseline | CV (5×28d) | — | 890.9 | 1162.9 | 11.8% | 8.0% | +484 |
-| model | CV (5×28d) | bez epidemii | **835.5** | **1111.8** | **11.3%** | 7.3% | +408 |
-| LightGBM | CV (5×28d) | bez epidemii | 862.8 | 1172.1 | 11.6% | 6.9% | **+368** |
+| model | CV (5×28d) | bez epidemii | **828.6** | **1109.6** | **11.3%** | 7.3% | +406 |
+| LightGBM | CV (5×28d) | bez epidemii | 865.4 | 1167.5 | 11.6% | 7.0% | **+381** |
 
 **Interpretacja (uczciwie):**
 - Na tym konkretnym oknie walidacji 6 z 28 dni to dni epidemiczne — scenariusz
-  "bez epidemii" jest wtedy systematycznie zbyt optymistyczny (bias +1154), a baseline
+  "bez epidemii" jest wtedy systematycznie zbyt optymistyczny (bias +1060), a baseline
   "zbiegiem okoliczności" trafił nisko (jego okno 28-dniowe zawiera dołek epidemiczny
   z końca treningu). Dlatego model przegrywa z baseline'em na val w tym scenariuszu.
-- Ze znanym harmonogramem epidemii model jest **o 38% lepszy od baseline'u** (MAE 652
-  vs 1053; MAPE 7.8% vs 14.4%).
+- Ze znanym harmonogramem epidemii model jest **o 40% lepszy od baseline'u** (MAE 630
+  vs 1053; MAPE 7.5% vs 14.4%).
 - W rolling-origin CV (5 foldów w treningu, scenariusz ex ante) model wygrywa
   z baseline'em MAE/RMSE/MAPE — to najuczciwszy obraz średniej jakości.
 
 **Cechy zewnętrzne — zmierzone, dwie decyzje:**
-- **Sezon kalendarzowy (Seasonality z danych) — ZOSTAŁ.** Kolumna jest
-  deterministyczna per data, więc współbieżna bez wycieku. Poprawia wszystkie
-  warianty (val-oracle MAE 663 → 652, CV 841 → 835).
+- **Sezon (Seasonality z danych) — ZOSTAŁ, po teście A/B trzech wariantów.**
+  Kolumna jest deterministyczna per data, więc współbieżna bez wycieku. Porównanie
+  (MAE: val / val-oracle / CV): bez cechy sezonu 1328.1 / 663.1 / 840.7; sezon
+  astronomiczny z daty 1298.8 / 652.5 / 835.5; sezon z danych **1284.4 / 630.2 /
+  828.6 — najlepszy w każdym oknie**. Detal, który łatwo przeoczyć: kolumna z danych
+  to sezony *meteorologiczne* (wiosna od 1. III itd.), a wcześniejsza wersja kodu
+  liczyła sezon *astronomiczny* — etykiety różniły się na 162 z 760 dni. Dla dat
+  poza danymi (horyzont prognozy) sezon jest wyliczany regułą meteorologiczną,
+  zgodną z kolumną 1:1 (zweryfikowane na całym szeregu).
 - **Cechy z lagiem 28 dni (zapas, promocja, rabat, cena, cena konkurencji,
   jednostki per kategoria) — ODRZUCONE, choć zaimplementowane** (`make_features(
   ..., use_lag_features=True)`). Lag 28 = horyzont prognozy, więc są znane ex ante
   (bez wycieku), ale zmierzone eksperymentem **pogarszają** wyniki (val-oracle
-  MAE 652 → 705). Szereg sieciowy jest tak gładki, że te sygnały to szum, nie
+  MAE 630 → 660). Szereg sieciowy jest tak gładki, że te sygnały to szum, nie
   informacja — spójne z testem udziałów kategorii w EDA (sekcja 5b). Zostają
   w kodzie jako udokumentowany eksperyment i materiał na rozmowę.
 
 **Porównanie z LightGBM:** do projektu dodaliśmy model gradient boostingowy
 (LightGBM) na **dokładnie tych samych cechach** — to kontrolowane porównanie klas
 modeli przy tej samej informacji. Wynik: LightGBM **nie bije** regresji liniowej
-(CV MAE 862.8 vs 835.5; RMSE i MAPE też lepsze u modelu liniowego; LightGBM wygrywa
+(CV MAE 865.4 vs 828.6; RMSE i MAPE też lepsze u modelu liniowego; LightGBM wygrywa
 tylko bias). To spodziewane i pouczające: przy 760 punktach jednego, gładkiego
 szeregu elastyczność drzew daje głównie ryzyko przeuczenia, a nie dodatkową wiedzę.
 W naszym drugim projekcie (M5 Forecasting: 30 490 szeregów × 1941 dni) ta zależność
@@ -131,11 +138,11 @@ Top-3 produkty wg łącznej sprzedaży: **P0007, P0004, P0009** (kategoria Groce
 
 | produkt | baseline MAE | model MAE (bez epidemii) |
 |---|---|---|
-| P0007 | 113.0 | 149.2 |
-| P0004 | 103.6 | **102.1** |
-| P0009 | 106.3 | **102.7** |
+| P0007 | 113.0 | 143.9 |
+| P0004 | 103.6 | 105.4 |
+| P0009 | 106.3 | **102.5** |
 
-Poziom produktu jest znacznie bardziej szumny (CV 0.24–0.30 vs 0.07 sieci), a okno
+Poziom produktu jest wyraźnie bardziej szumny (CV serii 0.24–0.30 vs 0.18 sieci), a okno
 walidacji z epidemicznym początkiem uderza w P0007. W realnym wdrożeniu model
 per produkt miałby dodatkowo sezon tygodniowy i cechy lag (`shift(1)`) — w tym
 zadaniu celowo zostaje prosty i spójny z modelem sieciowym.
