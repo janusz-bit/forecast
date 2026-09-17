@@ -177,7 +177,6 @@ def predict_lgbm(model: lgb.LGBMRegressor, index: pd.DatetimeIndex, epidemic,
     X = make_features(index, epidemic, history=history,
                       use_lag_features=use_lag_features)
     return pd.Series(model.predict(X), index=index, name="lgbm").clip(lower=0)
-    return pd.Series(model.predict(X), index=index, name="lgbm").clip(lower=0)
 
 
 def score(pred: pd.Series, actual: pd.Series) -> dict:
