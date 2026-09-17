@@ -23,6 +23,16 @@ uv run streamlit run src/app.py                # (docelowo) aplikacja
 
 Bez Nixa: wystarczy `uv sync --frozen` (Python ≥ 3.10).
 
+Aplikacja czyta gotowe wyniki z `outputs/` (są w repo — regeneruje je deterministycznie
+`src/data.py` + `src/model.py`), więc uruchamia się natychmiast, bez pobierania danych.
+
+### Wdrożenie (Streamlit Community Cloud)
+
+Aplikacja działa online na [share.streamlit.io](https://share.streamlit.io) (darmowe dla
+repozytoriów publicznych): po zalogowaniu kontem GitHub → *Create app* → wskaż to repo,
+branch `main`, plik `src/app.py`. Zależności dla chmury definiuje `requirements.txt`
+(dane i wyniki są w repo, więc chmura nie potrzebuje dostępu do Kaggle).
+
 ## Wybór czynników zewnętrznych
 
 Pełna analiza: [`notebooks/EDA.ipynb`](notebooks/EDA.ipynb). Kluczowe ustalenia:

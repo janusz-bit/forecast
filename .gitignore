@@ -1,8 +1,8 @@
 # --- local working files ---
 /priv/
 
-# --- artefakty ---
-outputs/*.csv
+# --- dane wynikowe (outputs/*.csv) są commitowane: aplikacja na
+#     Streamlit Cloud czyta je z repo; regeneruje je src/data.py + src/model.py ---
 
 # --- środowisko ---
 .venv/

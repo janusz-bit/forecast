@@ -1,0 +1,7 @@
+# Środowisko aplikacji (Streamlit Community Cloud) - pakiet "app" nie potrzebuje
+# dev-deps (jupyter, matplotlib); wersje zgodne z pyproject.toml / uv.lock
+pandas>=2.2
+numpy>=1.26
+scikit-learn>=1.4
+plotly>=5.20
+streamlit>=1.36
